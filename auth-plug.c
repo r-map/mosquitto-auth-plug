@@ -499,7 +499,7 @@ int mosquitto_auth_security_cleanup(void *userdata, struct mosquitto_auth_opt *a
 
 
 #if MOSQ_AUTH_PLUGIN_VERSION >=3
-int mosquitto_auth_unpwd_check(void *userdata, const struct mosquitto *client, const char *username, const char *password)
+int mosquitto_auth_unpwd_check(void *userdata, struct mosquitto *client, const char *username, const char *password)
 #else
 int mosquitto_auth_unpwd_check(void *userdata, const char *username, const char *password)
 #endif
@@ -598,7 +598,7 @@ int mosquitto_auth_unpwd_check(void *userdata, const char *username, const char 
 }
 
 #if MOSQ_AUTH_PLUGIN_VERSION >= 3
-int mosquitto_auth_acl_check(void *userdata, int access, const struct mosquitto *client, const struct mosquitto_acl_msg *msg)
+int mosquitto_auth_acl_check(void *userdata, int access,  struct mosquitto *client, const struct mosquitto_acl_msg *msg)
 #else
 int mosquitto_auth_acl_check(void *userdata, const char *clientid, const char *username, const char *topic, int access)
 #endif
@@ -642,6 +642,7 @@ int mosquitto_auth_acl_check(void *userdata, const char *clientid, const char *u
 	 * id to bypass ACL checks (or have a username/client id that cannot
 	 * publish or receive messages to its own place in the hierarchy).
 	 */
+	/*
 	if(username && strpbrk(username, "+#/")){
 		_log(MOSQ_LOG_NOTICE, "ACL denying access to client with dangerous username \"%s\"", username);
 		return MOSQ_DENY_ACL;
@@ -651,6 +652,7 @@ int mosquitto_auth_acl_check(void *userdata, const char *clientid, const char *u
 		_log(MOSQ_LOG_NOTICE, "ACL denying access to client with dangerous client id \"%s\"", clientid);
 		return MOSQ_DENY_ACL;
 	}
+	*/
 
 	_log(LOG_DEBUG, "mosquitto_auth_acl_check(..., %s, %s, %s, %s)",
 		clientid ? clientid : "NULL",
@@ -749,7 +751,7 @@ int mosquitto_auth_acl_check(void *userdata, const char *clientid, const char *u
 
 
 #if MOSQ_AUTH_PLUGIN_VERSION >= 3
-int mosquitto_auth_psk_key_get(void *userdata, const struct mosquitto *client, const char *hint, const char *identity, char *key, int max_key_len)
+int mosquitto_auth_psk_key_get(void *userdata,  struct mosquitto *client, const char *hint, const char *identity, char *key, int max_key_len)
 #else
 int mosquitto_auth_psk_key_get(void *userdata, const char *hint, const char *identity, char *key, int max_key_len)
 #endif
