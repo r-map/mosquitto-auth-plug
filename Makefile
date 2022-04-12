@@ -196,3 +196,7 @@ config.mk:
 	@echo "Please create your own config.mk file"
 	@echo "You can use config.mk.in as base"
 	@false
+
+install: auth-plug.so
+	$(INSTALL) -d ${DESTDIR}/usr/lib64
+	$(INSTALL) -m 644 auth-plug.so ${DESTDIR}/usr/lib64/auth-plug.so

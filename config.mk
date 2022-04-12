@@ -8,7 +8,7 @@ BACKEND_LDAP ?= no
 BACKEND_HTTP ?= yes
 BACKEND_JWT ?= no
 BACKEND_MONGO ?= no
-BACKEND_FILES ?= no
+BACKEND_FILES ?= yes
 BACKEND_MEMCACHED ?= no
 
 # Specify the path to the Mosquitto sources here
@@ -19,7 +19,7 @@ MOSQUITTO_SRC =
 OPENSSLDIR = /usr
 
 # Add support for django hashers algorithm name
-SUPPORT_DJANGO_HASHERS ?= no
+SUPPORT_DJANGO_HASHERS ?= yes
 
 # Specify optional/additional linker/compiler flags here
 # On macOS, add
@@ -29,4 +29,4 @@ SUPPORT_DJANGO_HASHERS ?= no
 # CFG_LDFLAGS = -undefined dynamic_lookup  -L/usr/local/Cellar/openssl/1.0.2l/lib
 # CFG_CFLAGS = -I/usr/local/Cellar/openssl/1.0.2l/include -I/usr/local/Cellar/mosquitto/1.4.12/include
 CFG_LDFLAGS =
-CFG_CFLAGS =
+CFG_CFLAGS = -DBE_PSK

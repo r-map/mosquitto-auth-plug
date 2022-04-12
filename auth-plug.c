@@ -77,7 +77,7 @@
 
 #if BE_PSK
 # define PSKSETUP do { \
-			if (!strcmp(psk_database, q)) { \
+			if (!(psk_database == NULL) && !strcmp(psk_database, q)) { \
 				(*pskbep)->conf =  (*bep)->conf; \
 				(*pskbep)->superuser =  (*bep)->superuser; \
 				(*pskbep)->aclcheck =  (*bep)->aclcheck; \
@@ -211,17 +211,18 @@ int mosquitto_auth_plugin_init(void **userdata, struct mosquitto_auth_opt *auth_
 	 */
 
 	if ((psk_database = p_stab("psk_database")) == NULL) {
-		_fatal("PSK is configured so psk_database needs to be set");
+		_log(LOG_NOTICE,"PSK: psk_database not set; PSK will be ignored");
+	} else {
+	  
+	  pskbep = bep;
+	  *pskbep = (struct backend_p *)malloc(sizeof(struct backend_p));
+	  memset(*pskbep, 0, sizeof(struct backend_p));
+	  (*pskbep)->name = strdup("psk");
+
+	  bep = pskbep;
+	  bep++;
+	  nord++;
 	}
-
-	pskbep = bep;
-	*pskbep = (struct backend_p *)malloc(sizeof(struct backend_p));
-	memset(*pskbep, 0, sizeof(struct backend_p));
-	(*pskbep)->name = strdup("psk");
-
-	bep = pskbep;
-	bep++;
-	nord++;
 #endif /* BE_PSK */
 
 	for (q = strsep(&p, ","); q && *q && (nord < NBACKENDS); q = strsep(&p, ",")) {
@@ -623,9 +624,12 @@ int mosquitto_auth_acl_check(void *userdata, const char *clientid, const char *u
 		if (client_cert == true) {
 			clientid = mosquitto_client_id(client);
 			username = mosquitto_client_username(client);
-		}
+		}else{
 
-		if (client_cert == false || clientid == NULL || username == NULL) {
+   		        clientid = mosquitto_client_id(client);
+		        username = mosquitto_client_username(client);
+                 }
+		if (clientid == NULL || username == NULL) {
 			return MOSQ_ERR_PLUGIN_DEFER;
 		}
 	}
@@ -771,7 +775,7 @@ int mosquitto_auth_psk_key_get(void *userdata, const char *hint, const char *ide
 	for (bep = ud->be_list; bep && *bep; bep++) {
 		struct backend_p *b = *bep;
 		if (!strcmp(database, b->name)) {
-			rc = b->getuser(b->conf, username, NULL, &psk_key);
+			rc = b->getuser(b->conf, username, NULL, &psk_key, mosquitto_client_id(client));
 			break;
 		}
 

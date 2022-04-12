@@ -38,6 +38,31 @@
 #include "envs.h"
 #include <curl/curl.h>
 
+#define RESPONSE_SIZE 254
+
+struct response_t {
+  char buffer[RESPONSE_SIZE];
+  size_t realsize;
+};
+
+
+static size_t WriteCallback (void *contents, size_t size, size_t nmemb, void *userp)
+{
+  size_t chunksize = size * nmemb;
+  struct response_t *response = (struct response_t *)userp;
+
+  if( (response->realsize + chunksize) > RESPONSE_SIZE) {
+    	_log(LOG_NOTICE, "not enough memory for http response\n");
+    return 0;
+  }
+
+  memcpy(&(response->buffer[response->realsize]), contents, chunksize);
+  response->realsize += chunksize;
+  response->buffer[response->realsize] = 0;
+
+  return chunksize;
+}
+
 static int get_string_envs(CURL *curl, const char *required_env, char *querystring)
 {
 	char *data = NULL;
@@ -93,7 +118,7 @@ static int get_string_envs(CURL *curl, const char *required_env, char *querystri
 	return (num);
 }
 
-static int http_post(void *handle, char *uri, const char *clientid, const char *username, const char *password, const char *topic, int acc, int method)
+static int http_post(void *handle, char *uri, const char *clientid, const char *username, const char *password, const char *topic, int acc, int method ,char* hash)
 {
 	struct http_backend *conf = (struct http_backend *)handle;
 	CURL *curl;
@@ -103,7 +128,10 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	int ok = BACKEND_DEFER;
 	char *url;
 	char *data;
-
+	struct response_t response;
+	response.realsize=0;
+	response.buffer[response.realsize] = 0;
+	
 	if (username == NULL) {
 		return BACKEND_DEFER;
 	}
@@ -195,16 +223,30 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	curl_easy_setopt(curl, CURLOPT_USERNAME, username);
 	curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
-
+	/* send all data to this function  */
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+	/* we pass our 'response' to the callback function */
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
 	re = curl_easy_perform(curl);
 	if (re == CURLE_OK) {
 		re = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &respCode);
 		if (re == CURLE_OK && respCode >= 200 && respCode < 300) {
-			ok = BACKEND_ALLOW;
+
+		  if ( method == METHOD_GETUSER ){
+		    ok = BACKEND_DEFER;
+		  }else if ( method == METHOD_SUPERUSER){
+		    ok = BACKEND_ALLOW;
+		  } else if ( method == METHOD_ACLCHECK ){
+		    ok = BACKEND_ALLOW;
+		  }
+
+		  _log(LOG_DEBUG, "http response %s", response.buffer);
+		  if(hash != NULL) strcpy(hash,response.buffer);
+
 		} else if (re == CURLE_OK && respCode >= 500) {
-			ok = BACKEND_ERROR;
+		  ok = BACKEND_ERROR;
 		} else {
-			//_log(LOG_NOTICE, "http auth fail re=%d respCode=%d", re, respCode);
+		  //_log(LOG_NOTICE, "http auth fail re=%d respCode=%d", re, respCode);
 		}
 	} else {
 		_log(LOG_DEBUG, "http req fail url=%s re=%s", url, curl_easy_strerror(re));
@@ -309,6 +351,8 @@ void be_http_destroy(void *handle)
 int be_http_getuser(void *handle, const char *username, const char *password, char **phash, const char *clientid) {
 	struct http_backend *conf = (struct http_backend *)handle;
 	int re, try;
+	char hash[RESPONSE_SIZE];
+	
 	if (username == NULL) {
 		return BACKEND_DEFER;
 	}
@@ -318,8 +362,11 @@ int be_http_getuser(void *handle, const char *username, const char *password, ch
 
 	while (re == BACKEND_ERROR && try <= conf->retry_count) {
 		try++;
-		re = http_post(handle, conf->getuser_uri, NULL, username, password, NULL, -1, METHOD_GETUSER);
+		re = http_post(handle, conf->getuser_uri, clientid, username, password, NULL, -1, METHOD_GETUSER,hash);
 	}
+
+	*phash = strdup(hash);
+	
 	return re;
 };
 
@@ -332,7 +379,7 @@ int be_http_superuser(void *handle, const char *username)
 	try = 0;
 	while (re == BACKEND_ERROR && try <= conf->retry_count) {
 		try++;
-		re = http_post(handle, conf->superuser_uri, NULL, username, NULL, NULL, -1, METHOD_SUPERUSER);
+		re = http_post(handle, conf->superuser_uri, NULL, username, NULL, NULL, -1, METHOD_SUPERUSER, NULL);
 	}
 	return re;
 };
@@ -347,7 +394,7 @@ int be_http_aclcheck(void *handle, const char *clientid, const char *username, c
 
 	while (re == BACKEND_ERROR && try <= conf->retry_count) {
 		try++;
-		re = http_post(conf, conf->aclcheck_uri, clientid, username, NULL, topic, acc, METHOD_ACLCHECK);
+		re = http_post(conf, conf->aclcheck_uri, clientid, username, NULL, topic, acc, METHOD_ACLCHECK, NULL);
 	}
 	return re;
 };
