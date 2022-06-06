@@ -133,6 +133,142 @@ typedef struct be_files {
 
 static dllist acl_entries = {{&acl_entries.head, &acl_entries.head}};
 
+
+/* Does a topic match a subscription? */
+int my_mosquitto_topic_matches_sub(const char *sub, const char *topic, bool *result)
+{
+	size_t spos;
+
+	if(!result) return MOSQ_ERR_INVAL;
+	*result = false;
+
+	if(!sub || !topic || sub[0] == 0 || topic[0] == 0){
+		return MOSQ_ERR_INVAL;
+	}
+
+	if((sub[0] == '$' && topic[0] != '$')
+			|| (topic[0] == '$' && sub[0] != '$')){
+
+		return MOSQ_ERR_SUCCESS;
+	}
+
+	spos = 0;
+
+	while(sub[0] != 0){
+	  /*
+	        if(topic[0] == '+' || topic[0] == '#'){
+		  LOG(MOSQ_LOG_WARNING, "topic with + or #");
+			return MOSQ_ERR_INVAL;
+		}
+	  */
+		if(sub[0] != topic[0] || topic[0] == 0){ /* Check for wildcard matches */
+			if(sub[0] == '+'){
+				/* Check for bad "+foo" or "a/+foo" subscription */
+				if(spos > 0 && sub[-1] != '/'){
+					return MOSQ_ERR_INVAL;
+				}
+				/* Check for bad "foo+" or "foo+/a" subscription */
+				if(sub[1] != 0 && sub[1] != '/'){
+					return MOSQ_ERR_INVAL;
+				}
+				spos++;
+				sub++;
+				while(topic[0] != 0 && topic[0] != '/'){
+				  //  if(topic[0] == '+' || topic[0] == '#'){
+				  //	return MOSQ_ERR_INVAL;
+				  //  }
+				  topic++;
+				}
+				if(topic[0] == 0 && sub[0] == 0){
+					*result = true;
+					return MOSQ_ERR_SUCCESS;
+				}
+			}else if(sub[0] == '#'){
+				/* Check for bad "foo#" subscription */
+				if(spos > 0 && sub[-1] != '/'){
+					return MOSQ_ERR_INVAL;
+				}
+				/* Check for # not the final character of the sub, e.g. "#foo" */
+				if(sub[1] != 0){
+					return MOSQ_ERR_INVAL;
+				}else{
+					while(topic[0] != 0){
+					  //  if(topic[0] == '+' || topic[0] == '#'){
+					  //	return MOSQ_ERR_INVAL;
+					  //  }
+					  topic++;
+					}
+					*result = true;
+					return MOSQ_ERR_SUCCESS;
+				}
+			}else{
+				/* Check for e.g. foo/bar matching foo/+/# */
+				if(topic[0] == 0
+						&& spos > 0
+						&& sub[-1] == '+'
+						&& sub[0] == '/'
+						&& sub[1] == '#')
+				{
+					*result = true;
+					return MOSQ_ERR_SUCCESS;
+				}
+
+				/* There is no match at this point, but is the sub invalid? */
+				while(sub[0] != 0){
+					if(sub[0] == '#' && sub[1] != 0){
+						return MOSQ_ERR_INVAL;
+					}
+					spos++;
+					sub++;
+				}
+
+				/* Valid input, but no match */
+				return MOSQ_ERR_SUCCESS;
+			}
+		}else{
+			/* sub[spos] == topic[tpos] */
+			if(topic[1] == 0){
+				/* Check for e.g. foo matching foo/# */
+				if(sub[1] == '/'
+						&& sub[2] == '#'
+						&& sub[3] == 0){
+					*result = true;
+					return MOSQ_ERR_SUCCESS;
+				}
+			}
+			spos++;
+			sub++;
+			topic++;
+			if(sub[0] == 0 && topic[0] == 0){
+				*result = true;
+				return MOSQ_ERR_SUCCESS;
+			}else if(topic[0] == 0 && sub[0] == '+' && sub[1] == 0){
+				if(spos > 0 && sub[-1] != '/'){
+					return MOSQ_ERR_INVAL;
+				}
+				spos++;
+				sub++;
+				*result = true;
+				return MOSQ_ERR_SUCCESS;
+			}
+		}
+	}
+	if((topic[0] != 0 || sub[0] != 0)){
+		*result = false;
+	}
+	while(topic[0] != 0){
+	  //  if(topic[0] == '+' || topic[0] == '#'){
+	  //		return MOSQ_ERR_INVAL;
+	  //  }
+	  topic++;
+	}
+
+	return MOSQ_ERR_SUCCESS;
+}
+
+
+
+
 static pwd_entry *find_pwd(be_files * conf, const char *username)
 {
 	pwd_entry *iter;
@@ -352,52 +488,80 @@ int be_files_superuser(void *handle, const char *username)
 }
 
 static int do_aclcheck(dllist * acl_list,
-		           const char *clientid,
-		           const char *username,
-		           const char *topic,
-		           int access)
+		       const char *clientid,
+		       const char *username,
+		       const char *topic,
+		       int access)
 {
-	char buf[512];
-	bool ret;
-	acl_entry *acl;
-	const char *t;
-	const char *si;
-	char *di;
-
-	dllist_for_each_element(acl_list, acl, entry) {
-		for (si = acl->topic, di = buf; *si != '\0';) {
-			switch (*si) {
-			case '%':
-				++si;
-				switch (*si) {
-				case 'c':
-					++si;
-					for (t = clientid; *t != '\0'; ++di, ++t)
-						*di = *t;
-					break;
-				case 'u':
-					++si;
-					for (t = username; *t != '\0'; ++di, ++t)
-						*di = *t;
-					break;
-				default:
-					*di++ = *si;
-					break;
-				}
-				break;
-			default:
-				*di++ = *si++;
-				break;
-			}
-		}
-		*di = '\0';
-		if (mosquitto_topic_matches_sub(buf, topic, &ret) != MOSQ_ERR_SUCCESS) {
-			LOG(MOSQ_LOG_ERR, "invalid topic '%s'", buf);
-		} else if (ret && (access & acl->access) != 0) {
-			return BACKEND_ALLOW;
-		}
+  char buf[512];
+  bool ret;
+  acl_entry *acl;
+  const char *t;
+  const char *si;
+  char *di;
+  
+  dllist_for_each_element(acl_list, acl, entry) {
+    for (si = acl->topic, di = buf; *si != '\0';) {
+      switch (*si) {
+      case '%':
+	++si;
+	switch (*si) {
+	case 'c':
+	  ++si;
+	  for (t = clientid; *t != '\0'; ++di, ++t)
+	    *di = *t;
+	  break;
+	case 'u':
+	  ++si;
+	  for (t = username; *t != '\0'; ++di, ++t)
+	    *di = *t;
+	  break;
+	default:
+	  *di++ = *si;
+	  break;
 	}
-	return BACKEND_DEFER;
+	break;
+      default:
+	*di++ = *si++;
+	break;
+      }
+    }
+    *di = '\0';
+    if (my_mosquitto_topic_matches_sub(buf, topic, &ret) != MOSQ_ERR_SUCCESS) {
+      LOG(MOSQ_LOG_ERR, "invalid topic '%s' : '%s'", buf,topic);
+    } else if (ret) {
+      
+      /*
+	So now the read/write value on your ACL table in the database must vary from 0 to 7.
+	
+	0: MOSQ_ACL_NONE        no access
+	1: MOSQ_ACL_READ        read
+	2: MOSQ_ACL_WRITE       write
+	3:                      read and write
+	4: MOSQ_ACL_SUBSCRIBE   subscribe
+	5:                      read & subscribe
+	6:                      write & subscribe
+	7:                      read, write and subscribe
+        8: MOSQ_ACL_UNSUBSCRIBE unsubscribe
+      */
+
+      // read & write acl then allow
+      if (acl->access == (MOSQ_ACL_READ | MOSQ_ACL_WRITE)) {
+	return BACKEND_ALLOW;
+      }
+
+      // access subscribe or unsubscribe then allow
+      if (((access & MOSQ_ACL_SUBSCRIBE) != 0) || ((access & MOSQ_ACL_UNSUBSCRIBE) != 0)) {
+	return BACKEND_ALLOW;
+      }     
+
+      // acl == access for read and write bit then allow
+      if ((acl->access ^ (access & (MOSQ_ACL_READ | MOSQ_ACL_WRITE))) == 0) {
+	return BACKEND_ALLOW;
+      }     
+    }
+  }  
+  return BACKEND_DEFER;
 }
 
 int be_files_aclcheck(void *handle,
@@ -414,11 +578,11 @@ int be_files_aclcheck(void *handle,
 		return BACKEND_ALLOW;
 
 	if (pwd != NULL) {
-		ret = do_aclcheck(&pwd->acl_entries, clientid, username, topic, access);
+	  ret = do_aclcheck(&pwd->acl_entries, clientid, username, topic, access);
 	}
 
 	if (ret == BACKEND_DEFER)
-		ret = do_aclcheck(&acl_entries, clientid, username, topic, access);
+	  ret = do_aclcheck(&acl_entries, clientid, username, topic, access);
 	return ret;
 }
 
